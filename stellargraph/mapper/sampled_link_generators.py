@@ -373,20 +373,13 @@ class HinSAGELinkGenerator(BatchedLinkGenerator):
         data_gen = G_generator.flow(edge_ids)
     """
 
-    def __init__(
-        self,
-        G,
-        batch_size,
-        num_samples,
-        head_node_types=None,
-        schema=None,
-        seed=None,
-        name=None,
-    ):
+    def __init__(self,G,batch_size,num_samples,head_node_types=None,schema=None,seed=None,name=None,weight=None):
+        
         super().__init__(G, batch_size, schema)
         self.num_samples = num_samples
         self.name = name
-
+        self.weight=weight
+        
         # This is a link generator and requires two nodes per query
         if head_node_types is None:
             # infer the head node types, if this is a homogeneous-node graph
@@ -454,21 +447,44 @@ class HinSAGELinkGenerator(BatchedLinkGenerator):
             where ``num_sampled_at_layer`` is the cumulative product of `num_samples`
             for that layer.
         """
+        
+        np.random.seed(0)
+        
         nodes_by_type = []
+
+        batch_game_idx=[e[1] for e in head_links]
+        
+        selected=[self.weight[idx] for idx in batch_game_idx]
+
+        weights=np.divide(selected, [batch_game_idx.count(e) for e in batch_game_idx])
+
+        print('789')
+        sampled_head_nodes_idx=np.random.choice(range(0, len(head_links)), len(head_links), replace=True, p=weights/sum(weights))
+       
+        print('101112')
+        sampled_head_nodes=[head_links[idx] for idx in sampled_head_nodes_idx]
+        
         for ii in range(2):
             # Extract head nodes from edges: each edge is a tuple of 2 nodes, so we are extracting 2 head nodes per edge
-            head_nodes = [e[ii] for e in head_links]
-
+        #    head_nodes = [e[1][ii] for e in enumerate(head_links)]
+        #    head_nodes_idx = [e[0] for e in enumerate(head_links)]
+            
             # Get sampled nodes for the subgraphs starting from the (src, dst) head nodes
             # nodes_samples is list of two lists: [[samples for src], [samples for dst]]
+            
+            if len(self.weight)>0:
+              head_nodes=[e[ii] for e in sampled_head_nodes] 
+            else:
+              head_nodes = [e[ii] for e in head_links]
+            
             node_samples = self.sampler.run(
-                nodes=head_nodes, n=1, n_size=self.num_samples
+              nodes=head_nodes, n=1, n_size=self.num_samples
             )
+            
 
             # Reshape node samples to the required format for the HinSAGE model
             # This requires grouping the sampled nodes by edge type and in order
-            nodes_by_type.append(
-                [
+            nodes_by_type.append([
                     (
                         nt,
                         reduce(
@@ -480,7 +496,7 @@ class HinSAGELinkGenerator(BatchedLinkGenerator):
                     for nt, indices in self._sampling_schema[ii]
                 ]
             )
-
+            
         # Interlace the two lists, nodes_by_type[0] (for src head nodes) and nodes_by_type[1] (for dst head nodes)
         nodes_by_type = [
             tuple((ab[0][0], reduce(operator.concat, (ab[0][1], ab[1][1]))))
@@ -491,7 +507,7 @@ class HinSAGELinkGenerator(BatchedLinkGenerator):
 
         return batch_feats
 
-
+        
 class Attri2VecLinkGenerator(BatchedLinkGenerator):
     """
     A data generator for context node prediction with the attri2vec model.
@@ -742,3 +758,4 @@ class DirectedGraphSAGELinkGenerator(BatchedLinkGenerator):
         # This matches the GraphSAGE link model with (node_src, node_dst) input sockets:
         batch_feats = [feats for ab in zip(*batch_feats) for feats in ab]
         return batch_feats
+
